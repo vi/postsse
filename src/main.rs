@@ -5,21 +5,43 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 const GET: Method = Method::GET;
 const POST: Method = Method::POST;
+use http::header::ACCESS_CONTROL_ALLOW_ORIGIN;
+use http::header::CONTENT_TYPE;
 
-struct MyService{
-
-}
+struct MyService {}
 
 impl MyService {
     fn new() -> Self {
-        Self {
-
-        }
+        Self {}
     }
 
     async fn handle(&self, _req: Request<Body>) -> Result<Response<Body>, Infallible> {
         Ok(match *_req.method() {
-            GET => Response::new(Body::from("Hello World\n")),
+            GET => {
+                let (mut ch, body) = Body::channel();
+                tokio::spawn(async move {
+                    let _ = ch
+                        .send_data(bytes::Bytes::from_static(b"data: 1\n\n"))
+                        .await;
+                    tokio::time::delay_for(std::time::Duration::from_secs(1)).await;
+                    let _ = ch
+                        .send_data(bytes::Bytes::from_static(b"data: 2\n\n"))
+                        .await;
+                    tokio::time::delay_for(std::time::Duration::from_secs(1)).await;
+                    let _ = ch
+                        .send_data(bytes::Bytes::from_static(b"data: 3\n\n"))
+                        .await;
+                    let _ = ch
+                        .send_data(bytes::Bytes::from_static(b""))
+                        .await;
+                });
+                Response::builder()
+                    .header(CONTENT_TYPE, "text/event-stream")
+                    .header(ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+                    .status(200)
+                    .body(body)
+                    .unwrap()
+            }
             POST => Response::new(Body::from("Hello World\n")),
             _ => Response::builder()
                 .status(400)
