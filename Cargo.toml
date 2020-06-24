@@ -12,3 +12,4 @@ tokio = {version="0.2.21", features=["macros","net","time","rt-threaded"]}
 anyhow = "1.0.31"
 http = "0.2.1"
 bytes = "0.5.5"
+dashmap = "3.11.4"
