@@ -11,8 +11,7 @@ use http::header::ACCESS_CONTROL_ALLOW_ORIGIN;
 use http::header::CONTENT_TYPE;
 
 use dashmap::DashMap as HashMap;
-use tokio::sync::broadcast::{Sender,Receiver,channel};
-
+use tokio::sync::broadcast::{channel, Receiver, Sender};
 
 struct Loc {
     s: Sender<String>,
@@ -35,8 +34,8 @@ impl MyService {
             GET => {
                 let mut r = {
                     let p = _req.uri().path();
-                    let l = self.locs.entry(p.to_string()).or_insert_with(||{
-                        let (s,_r) = channel(2);
+                    let l = self.locs.entry(p.to_string()).or_insert_with(|| {
+                        let (s, _r) = channel(2);
                         Loc { s }
                     });
                     l.s.subscribe()
@@ -44,24 +43,17 @@ impl MyService {
                 let (mut ch, body) = Body::channel();
                 tokio::spawn(async move {
                     while let Ok(msg) = r.recv().await {
-                        for l in msg.lines().map(|x|x.to_string()) {
-                            let _ = ch
-                            .send_data(bytes::Bytes::from_static(b"data: "))
-                            .await;
-
-                        let _ = ch
-                        .send_data(bytes::Bytes::from(l))
-                        .await;
-
-                            let _ = ch
-                            .send_data(bytes::Bytes::from_static(b"\n"))
-                            .await;
+                        let mut b = bytes::BytesMut::with_capacity(msg.len() + 12);
+                        for l in msg.lines().map(|x| x.to_string()) {
+                            b.extend_from_slice(b"data: ");
+                            b.extend_from_slice(l.as_bytes());
+                            b.extend_from_slice(b"\n");
                         }
+                        b.extend_from_slice(b"\n");
 
-                        let _ = ch
-                        .send_data(bytes::Bytes::from_static(b"\n"))
-                        .await;
-
+                        if let Err(_) = ch.send_data(b.freeze()).await {
+                            break;
+                        }
                     }
                 });
                 Response::builder()
@@ -74,9 +66,7 @@ impl MyService {
             POST => {
                 let p = _req.uri().path();
                 match self.locs.get(p) {
-                    None => {
-                        Response::builder().status(404).body(Body::empty()).unwrap()
-                    }
+                    None => Response::builder().status(404).body(Body::empty()).unwrap(),
                     Some(l) => {
                         let s = l.s.clone();
                         drop(l);
@@ -92,8 +82,7 @@ impl MyService {
                         Response::builder().status(204).body(Body::empty()).unwrap()
                     }
                 }
-                
-            },
+            }
             _ => Response::builder()
                 .status(400)
                 .body(Body::from("Method should be GET or POST\n"))
