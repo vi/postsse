@@ -4,6 +4,7 @@ use bytes::Buf;
 use http::method::Method;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
+use tokio::sync::broadcast::error::RecvError;
 use std::convert::Infallible;
 use std::io::BufRead;
 use std::net::SocketAddr;
@@ -43,9 +44,15 @@ impl MyService {
                 };
                 let (mut ch, body) = Body::channel();
                 tokio::spawn(async move {
-                    'msgloop: while let Ok(msg) = rx.recv().await {
-                        if let Err(_) = ch.send_data(msg).await {
-                            break;
+                    loop {
+                        match rx.recv().await {
+                            Ok(msg) => {
+                                if let Err(_) = ch.send_data(msg).await {
+                                    break;
+                                }
+                            }
+                            Err(RecvError::Closed) => break /* should not happen */,
+                            Err(RecvError::Lagged(_n)) => continue,
                         }
                     }
                 });
