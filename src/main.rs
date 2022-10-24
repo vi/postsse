@@ -1,20 +1,18 @@
-#![allow(unused)]
-
 use bytes::Buf;
 use http::method::Method;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
-use tokio::sync::broadcast::error::RecvError;
 use std::convert::Infallible;
 use std::io::BufRead;
 use std::net::SocketAddr;
+use tokio::sync::broadcast::error::RecvError;
 const GET: Method = Method::GET;
 const POST: Method = Method::POST;
 use http::header::ACCESS_CONTROL_ALLOW_ORIGIN;
 use http::header::CONTENT_TYPE;
 
 use dashmap::DashMap;
-use tokio::sync::broadcast::{channel, Receiver, Sender};
+use tokio::sync::broadcast::{channel, Sender};
 
 struct Loc {
     sender: Sender<bytes::Bytes>,
@@ -51,7 +49,7 @@ impl MyService {
                                     break;
                                 }
                             }
-                            Err(RecvError::Closed) => break /* should not happen */,
+                            Err(RecvError::Closed) => break, /* should not happen */
                             Err(RecvError::Lagged(_n)) => continue,
                         }
                     }
@@ -76,12 +74,11 @@ impl MyService {
                         let sender = loc_lock.sender.clone();
                         drop(loc_lock);
                         let body = _req.into_body();
-                        use bytes::Buf;
-                        if let Ok(mut msg) = hyper::body::aggregate(body).await {
+                        if let Ok(body) = hyper::body::aggregate(body).await {
                             // Convert lines of `msg` to text/event-stream format
-                            let mut buf = bytes::BytesMut::with_capacity(msg.remaining() + 12);
-                            let mut sbuf = String::with_capacity(msg.remaining().min(128));
-                            let mut buf_reader = msg.reader();
+                            let mut buf = bytes::BytesMut::with_capacity(body.remaining() + 12);
+                            let mut sbuf = String::with_capacity(body.remaining().min(128));
+                            let mut buf_reader = body.reader();
 
                             loop {
                                 sbuf.clear();
@@ -96,14 +93,14 @@ impl MyService {
                                             buf.extend_from_slice(b"\n");
                                         }
                                     }
-                                    Err(x) => {
+                                    Err(_) => {
                                         return Ok(Response::builder().status(400).body(Body::from("Binary data is not supported by HTTP's text/event-stream\n")).unwrap());
                                     }
                                 }
                             }
                             buf.extend_from_slice(b"\n");
 
-                            if let Err(e) = sender.send(buf.freeze()) {
+                            if let Err(_) = sender.send(buf.freeze()) {
                                 Response::builder()
                                     .status(404)
                                     .body(Body::from(
