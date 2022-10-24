@@ -11,7 +11,7 @@ This is intended to be used as a building block, especially during development o
 
 # Limitations
 
-* If receiver reads messages slowly, messages get dropped. If you want adjustable buffer size or other stategies (buffer endlessly or slow down senders), open a Github issue with a feature request.
+* If receiver reads messages slowly, messages get dropped. If you want adjustable buffer size or other stategies (buffer endlessly or slow down senders), open Github issue with a feature request.
 * No DoS resistance. Each encountered URL path is remembered forever, there are no limitations for message size or number of paths or receivers. 
 
 # Installation
