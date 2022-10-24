@@ -1,57 +1,50 @@
 #![allow(unused)]
 
+use bytes::Buf;
 use http::method::Method;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
 use std::convert::Infallible;
+use std::io::BufRead;
 use std::net::SocketAddr;
 const GET: Method = Method::GET;
 const POST: Method = Method::POST;
 use http::header::ACCESS_CONTROL_ALLOW_ORIGIN;
 use http::header::CONTENT_TYPE;
 
-use dashmap::DashMap as HashMap;
+use dashmap::DashMap;
 use tokio::sync::broadcast::{channel, Receiver, Sender};
 
 struct Loc {
-    s: Sender<String>,
-    //r: Receiver<String>,
+    sender: Sender<bytes::Bytes>,
 }
 
 struct MyService {
-    locs: HashMap<String, Loc>,
+    locs: DashMap<String, Loc>,
 }
 
 impl MyService {
     fn new() -> Self {
         Self {
-            locs: HashMap::new(),
+            locs: DashMap::new(),
         }
     }
 
     async fn handle(&self, _req: Request<Body>) -> Result<Response<Body>, Infallible> {
         Ok(match *_req.method() {
             GET => {
-                let mut r = {
-                    let p = _req.uri().path();
-                    let l = self.locs.entry(p.to_string()).or_insert_with(|| {
-                        let (s, _r) = channel(2);
-                        Loc { s }
+                let mut rx = {
+                    let path = _req.uri().path();
+                    let loc_lock = self.locs.entry(path.to_string()).or_insert_with(|| {
+                        let (sender, _rx) = channel(2);
+                        Loc { sender }
                     });
-                    l.s.subscribe()
+                    loc_lock.sender.subscribe()
                 };
                 let (mut ch, body) = Body::channel();
                 tokio::spawn(async move {
-                    while let Ok(msg) = r.recv().await {
-                        let mut b = bytes::BytesMut::with_capacity(msg.len() + 12);
-                        for l in msg.lines().map(|x| x.to_string()) {
-                            b.extend_from_slice(b"data: ");
-                            b.extend_from_slice(l.as_bytes());
-                            b.extend_from_slice(b"\n");
-                        }
-                        b.extend_from_slice(b"\n");
-
-                        if let Err(_) = ch.send_data(b.freeze()).await {
+                    'msgloop: while let Ok(msg) = rx.recv().await {
+                        if let Err(_) = ch.send_data(msg).await {
                             break;
                         }
                     }
@@ -64,22 +57,61 @@ impl MyService {
                     .unwrap()
             }
             POST => {
-                let p = _req.uri().path();
-                match self.locs.get(p) {
-                    None => Response::builder().status(404).body(Body::empty()).unwrap(),
-                    Some(l) => {
-                        let s = l.s.clone();
-                        drop(l);
-                        let b = _req.into_body();
-                        tokio::spawn(async move {
-                            use bytes::Buf;
-                            if let Ok(msg) = hyper::body::aggregate(b).await {
-                                if let Ok(msg) = String::from_utf8(msg.bytes().to_vec()) {
-                                    s.send(msg);
+                let path = _req.uri().path();
+                match self.locs.get(path) {
+                    None => Response::builder()
+                        .status(404)
+                        .body(Body::from(
+                            "No ongoing GET queries are listening for POST data on this URL.\n",
+                        ))
+                        .unwrap(),
+                    Some(loc_lock) => {
+                        let sender = loc_lock.sender.clone();
+                        drop(loc_lock);
+                        let body = _req.into_body();
+                        use bytes::Buf;
+                        if let Ok(mut msg) = hyper::body::aggregate(body).await {
+                            // Convert lines of `msg` to text/event-stream format
+                            let mut buf = bytes::BytesMut::with_capacity(msg.remaining() + 12);
+                            let mut sbuf = String::with_capacity(msg.remaining().min(128));
+                            let mut buf_reader = msg.reader();
+
+                            loop {
+                                sbuf.clear();
+                                match buf_reader.read_line(&mut sbuf) {
+                                    Ok(n) => {
+                                        if n == 0 {
+                                            break;
+                                        }
+                                        buf.extend_from_slice(b"data: ");
+                                        buf.extend_from_slice(sbuf.as_bytes());
+                                        if !sbuf.ends_with('\n') {
+                                            buf.extend_from_slice(b"\n");
+                                        }
+                                    }
+                                    Err(x) => {
+                                        return Ok(Response::builder().status(400).body(Body::from("Binary data is not supported by HTTP's text/event-stream\n")).unwrap());
+                                    }
                                 }
                             }
-                        });
-                        Response::builder().status(204).body(Body::empty()).unwrap()
+                            buf.extend_from_slice(b"\n");
+
+                            if let Err(e) = sender.send(buf.freeze()) {
+                                Response::builder()
+                                    .status(404)
+                                    .body(Body::from(
+                                        "There was a receiver for this URL, but it is gone now.\n",
+                                    ))
+                                    .unwrap()
+                            } else {
+                                Response::builder().status(204).body(Body::empty()).unwrap()
+                            }
+                        } else {
+                            Response::builder()
+                                .status(500)
+                                .body(Body::from("Failed reading input data from POST request.\n"))
+                                .unwrap()
+                        }
                     }
                 }
             }
@@ -91,7 +123,7 @@ impl MyService {
     }
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     let addr = std::env::args()
         .into_iter()
