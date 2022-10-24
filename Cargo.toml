@@ -3,8 +3,12 @@ name = "postsse"
 version = "0.1.0"
 authors = ["Vitaly _Vi Shukela <vi0oss@gmail.com>"]
 edition = "2018"
+repository = "https://github.com/vi/postsse"
+categories = ["command-line-utilities","network-programming","web-programming::http-server"]
+keywords = ["sse", "event-stream", "publish-subscribe", "post", "http"]
+description = "Simple HTTP server that lets subsribe for data with GET requests (as text/event-stream SSE) and emit data with POST requests"
+license = "MIT OR Apache-2.0"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 hyper = {version = "0.14", features=["http1","http2","server", "runtime"]}
@@ -13,3 +17,13 @@ anyhow = "1.0.31"
 http = "0.2.1"
 bytes = "1.2"
 dashmap = "5"
+
+[profile.release]
+opt-level = "s"
+debug = 1
+rpath = false
+lto = true
+debug-assertions = false
+codegen-units = 1
+incremental = false
+panic = 'abort'
