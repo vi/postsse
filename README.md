@@ -49,3 +49,4 @@ data: DEF        |     --data-binary $'ABC\nDEF\n'
 # See also
 
 * https://github.com/vi/wsbroad - WebSocket analogue. If needed, it is not hard to create a combined publish-subscriber with both POST/SSE and WebSockets.
+* https://github.com/vi/line2httppost - CLI tool to send stdin lines as POST requests, fits well with postsse.
